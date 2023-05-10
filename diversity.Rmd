@@ -1,0 +1,469 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(data.table)
+
+library(ggplot2)
+theme_set(theme_light())
+```
+
+# Loading data
+
+```{r}
+hgr = fread("../Data/host_guests_reviews.csv")
+str(hgr)
+```
+
+```{r}
+hosts = hgr[, .(.N), by=.(listing_id, h_gen, h_age, h_etn, host_since_year)]
+guests = hgr[, .(.N), by=.(guest_id, g_gen, g_age, g_etn, guest_since_year)]
+```
+
+
+# Actual values
+
+## Hosts gender over time
+
+```{r}
+table(hosts$host_since_year, hosts$h_gen)
+```
+
+```{r}
+hosts_by_year =  hosts[, .(tot_hosts=.N), by=.(host_since_year)]
+str(hosts_by_year)
+```
+
+```{r}
+hosts_gender = merge(
+  hosts[, .(.N), by=.(host_since_year, h_gen)],
+  hosts_by_year,
+  by = "host_since_year"
+)
+
+hosts_gender$ratio = hosts_gender$N / hosts_gender$tot_hosts
+
+str(hosts_gender)
+```
+
+```{r}
+ggplot(hosts_gender[host_since_year>=2012 & host_since_year<2020], aes(x=host_since_year, y=ratio, col=h_gen, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+
+**Take away point**: slight prevalence of female hosts over time. The gap is now smaller.
+
+## Guests gender over time
+
+```{r}
+table(guests$guest_since_year, guests$g_gen)
+```
+
+```{r}
+guests_by_year =  guests[, .(tot_guests=.N), by=.(guest_since_year)]
+str(guests_by_year)
+```
+
+```{r}
+guests_gender = merge(
+  guests[, .(.N), by=.(guest_since_year, g_gen)],
+  guests_by_year,
+  by = "guest_since_year"
+)
+
+guests_gender$ratio = guests_gender$N / guests_gender$tot_guests
+
+str(guests_gender)
+```
+
+
+```{r}
+ggplot(guests_gender[guest_since_year>=2012 & guest_since_year<2020], aes(x=guest_since_year, y=ratio, col=g_gen, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+**Take away point**: slight prevalence of female guests over time. The gap is increasing.
+
+
+## Hosts age over time
+
+```{r}
+table(hosts$host_since_year, hosts$h_age)
+```
+
+```{r}
+hosts_age = merge(
+  hosts[, .(.N), by=.(host_since_year, h_age)],
+  hosts_by_year,
+  by = "host_since_year"
+)
+
+hosts_age$ratio = hosts_age$N / hosts_age$tot_hosts
+
+str(hosts_age)
+```
+
+```{r}
+ggplot(hosts_age[host_since_year>=2012 & host_since_year<2020], aes(x=host_since_year, y=ratio, col=h_age, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+**Take away point**: Prevalence of 30-39 yo in hosts. Over time the 18-29 group increases and the 40+ decreases (in percentage).
+
+
+
+# Guest age over time
+
+```{r}
+table(guests$guest_since_year, guests$g_age)
+```
+
+
+```{r}
+guests_age = merge(
+  guests[, .(.N), by=.(guest_since_year, g_age)],
+  guests_by_year,
+  by = "guest_since_year"
+)
+
+guests_age$ratio = guests_age$N / guests_age$tot_guests
+
+str(guests_age)
+```
+
+```{r}
+ggplot(guests_age[guest_since_year>=2012 & guest_since_year<2020], aes(x=guest_since_year, y=ratio, col=g_age, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+**Take away point**: Prevalence of 30-39 yo in guests. Over time the 18-29 group increases and the 40+ decreases (in percentage).
+
+
+## Hosts ethnicity over time
+
+
+```{r}
+table(hosts$host_since_year, hosts$h_etn)
+```
+
+```{r}
+hosts_etn = merge(
+  hosts[, .(.N), by=.(host_since_year, h_etn)],
+  hosts_by_year,
+  by = "host_since_year"
+)
+
+hosts_etn$ratio = hosts_etn$N / hosts_etn$tot_hosts
+
+str(hosts_etn)
+```
+
+
+
+```{r}
+ggplot(hosts_etn[host_since_year>=2012 & host_since_year<2020], aes(x=host_since_year, y=ratio, col=h_etn, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+**Take away point**: White hosts are dominant.. Black community is increasing over time. Other communities (such as hispanic) increasing too.
+
+
+## Guests ethnicity over time
+
+```{r}
+table(guests$guest_since_year, guests$g_etn)
+```
+
+
+```{r}
+guests_etn = merge(
+  guests[, .(.N), by=.(guest_since_year, g_etn)],
+  guests_by_year,
+  by = "guest_since_year"
+)
+
+guests_etn$ratio = guests_etn$N / guests_etn$tot_guests
+
+str(guests_etn)
+```
+
+```{r}
+ggplot(guests_etn[guest_since_year>=2012 & guest_since_year<2020], aes(x=guest_since_year, y=ratio, col=g_etn, label=round(ratio,2))) +
+  geom_line(size=.25, linetype="dotted") +
+  geom_smooth(se=F, span = 1) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  scale_x_continuous(breaks = 2008:2020) +
+  ylim(0,NA) +
+  scale_color_hue(l=50)
+```
+
+**Take away point**: White guests are dominant.. Black community is slightly increasing over time. Asian community has increased too.
+
+
+
+
+
+
+
+
+# Moving average
+
+## Gender
+
+```{r}
+year_back = hosts_gender
+year_fut = hosts_gender
+
+year_back$host_since_year = year_back$host_since_year - 1
+year_fut$host_since_year = year_fut$host_since_year + 1
+
+semi_j = merge(hosts_gender,
+              year_back[, .(host_since_year, h_gen, r_back=ratio)],
+              by = c("host_since_year", "h_gen"),
+              all.x = T)
+
+h_gen = merge(semi_j,
+              year_fut[, .(host_since_year, h_gen, r_fut=ratio)],
+              by = c("host_since_year", "h_gen"),
+              all.x = T)
+
+h_gen$ratio_avg = rowMeans(h_gen[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+year_back = guests_gender
+year_fut = guests_gender
+
+year_back$guest_since_year = year_back$guest_since_year - 1
+year_fut$guest_since_year = year_fut$guest_since_year + 1
+
+semi_j = merge(guests_gender,
+              year_back[, .(guest_since_year, g_gen, r_back=ratio)],
+              by = c("guest_since_year", "g_gen"),
+              all.x = T)
+
+g_gen = merge(semi_j,
+              year_fut[, .(guest_since_year, g_gen, r_fut=ratio)],
+              by = c("guest_since_year", "g_gen"),
+              all.x = T)
+
+g_gen$ratio_avg = rowMeans(g_gen[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+h_gen$user = "Host"
+g_gen$user = "Guest"
+
+hg_gen = rbind(
+  h_gen[, .(year=host_since_year, gender=h_gen, ratio=ratio_avg, user)],
+  g_gen[, .(year=guest_since_year, gender=g_gen, ratio=ratio_avg, user)]
+)
+
+hg_gen[gender == "female", gender := "Female"]
+hg_gen[gender == "male", gender := "Male"]
+```
+
+
+```{r}
+p = ggplot(hg_gen[year>=2012 & year<2020], aes(x=year, y=ratio, col=gender, label=round(ratio,2))) +
+  geom_line(size=.5) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  facet_wrap( ~ user) +
+  scale_x_continuous(breaks = (1:2000)*2) +
+  ylim(0,NA) +
+  scale_color_hue(l=50) +
+  labs(colour = "") +
+  theme(legend.position = "bottom")
+
+print(p)
+
+ggsave("gen_year.pdf", plot = p)
+```
+
+
+## Age
+
+```{r}
+year_back = hosts_age
+year_fut = hosts_age
+
+year_back$host_since_year = year_back$host_since_year - 1
+year_fut$host_since_year = year_fut$host_since_year + 1
+
+semi_j = merge(hosts_age,
+               year_back[, .(host_since_year, h_age, r_back=ratio)],
+               by = c("host_since_year", "h_age"),
+               all.x = T)
+
+h_age = merge(semi_j,
+              year_fut[, .(host_since_year, h_age, r_fut=ratio)],
+              by = c("host_since_year", "h_age"),
+              all.x = T)
+
+h_age$ratio_avg = rowMeans(h_age[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+year_back = guests_age
+year_fut = guests_age
+
+year_back$guest_since_year = year_back$guest_since_year - 1
+year_fut$guest_since_year = year_fut$guest_since_year + 1
+
+semi_j = merge(guests_age,
+               year_back[, .(guest_since_year, g_age, r_back=ratio)],
+               by = c("guest_since_year", "g_age"),
+               all.x = T)
+
+g_age = merge(semi_j,
+              year_fut[, .(guest_since_year, g_age, r_fut=ratio)],
+              by = c("guest_since_year", "g_age"),
+              all.x = T)
+
+g_age$ratio_avg = rowMeans(g_age[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+h_age$user = "Host"
+g_age$user = "Guest"
+
+hg_age = rbind(
+  h_age[, .(year=host_since_year, age=h_age, ratio=ratio_avg, user)],
+  g_age[, .(year=guest_since_year, age=g_age, ratio=ratio_avg, user)]
+)
+```
+
+
+```{r}
+p = ggplot(hg_age[year>=2012 & year<2020 & age!="0-17"], aes(x=year, y=ratio, col=age, label=round(ratio,2))) +
+  geom_line(size=.5) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  facet_wrap( ~ user) +
+  scale_x_continuous(breaks = (1:2000)*2 ) +
+  ylim(0,NA) +
+  scale_color_hue(l=50) +
+  labs(colour = "") +
+  theme(legend.position = "bottom")
+
+print(p)
+ggsave("age_year.pdf", plot = p)
+```
+
+## Etn
+
+```{r}
+year_back = hosts_etn
+year_fut = hosts_etn
+
+year_back$host_since_year = year_back$host_since_year - 1
+year_fut$host_since_year = year_fut$host_since_year + 1
+
+semi_j = merge(hosts_etn,
+               year_back[, .(host_since_year, h_etn, r_back=ratio)],
+               by = c("host_since_year", "h_etn"),
+               all.x = T)
+
+h_etn = merge(semi_j,
+              year_fut[, .(host_since_year, h_etn, r_fut=ratio)],
+              by = c("host_since_year", "h_etn"),
+              all.x = T)
+
+h_etn$ratio_avg = rowMeans(h_etn[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+year_back = guests_etn
+year_fut = guests_etn
+
+year_back$guest_since_year = year_back$guest_since_year - 1
+year_fut$guest_since_year = year_fut$guest_since_year + 1
+
+semi_j = merge(guests_etn,
+               year_back[, .(guest_since_year, g_etn, r_back=ratio)],
+               by = c("guest_since_year", "g_etn"),
+               all.x = T)
+
+g_etn = merge(semi_j,
+              year_fut[, .(guest_since_year, g_etn, r_fut=ratio)],
+              by = c("guest_since_year", "g_etn"),
+              all.x = T)
+
+g_etn$ratio_avg = rowMeans(g_etn[, .(ratio, r_back, r_fut)], na.rm=TRUE)
+
+remove(year_back, year_fut, semi_j)
+```
+
+```{r}
+h_etn$user = "Host"
+g_etn$user = "Guest"
+
+hg_etn = rbind(
+  h_etn[, .(year=host_since_year, etn=h_etn, ratio=ratio_avg, user)],
+  g_etn[, .(year=guest_since_year, etn=g_etn, ratio=ratio_avg, user)]
+)
+```
+
+
+```{r}
+p = ggplot(hg_etn[year>=2012 & year<2020], aes(x=year, y=ratio, col=etn, label=round(ratio,2))) +
+  geom_line(size=.5) +
+  geom_text(check_overlap = TRUE, size=3, col="black", vjust = 0, nudge_y = 0.007) +
+  geom_point(size=1) +
+  facet_wrap( ~ user) +
+  scale_x_continuous(breaks = (1:2000)*2 ) +
+  ylim(0,NA) +
+  scale_color_hue(l=50) +
+  labs(colour = "") +
+  theme(legend.position = "bottom")
+
+print(p)
+ggsave("etn_year.pdf", plot = p)
+```
+
+End!

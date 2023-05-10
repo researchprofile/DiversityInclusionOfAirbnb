@@ -1,0 +1,693 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(data.table)
+library(irr) # for kappa2 function
+
+library(ggplot2)
+theme_set(theme_minimal())
+
+library(ggrepel) # for plots
+```
+
+# Preliminary 
+
+Loading data
+
+```{r}
+hgr = fread("../Data/host_guests_reviews.csv")
+str(hgr)
+```
+
+Setting `myloop` rounds of null models
+
+```{r}
+myloop = 100
+```
+
+Setting some variables useful to control for *location*, *property price* and *room type*.
+
+```{r}
+locations = unique( hgr$loc )
+prices = unique( hgr$prc )
+rooms = unique( hgr$room_type )
+```
+
+
+# Null model for gender
+
+```{r}
+# aggregating the actual network
+hg_gr_gen = hgr[, .(cnt = .N, 
+                    sentiment = mean(compound, na.rm=TRUE),
+                    pos = mean(pos, na.rm=TRUE),
+                    neu = mean(neu, na.rm=TRUE),
+                    neg = mean(neg, na.rm=TRUE)),
+                by=.(hg_gen, h_gen, g_gen)]
+
+hg_join_gen = NULL
+kappa_scores = NULL
+for (i in 1:myloop)
+{
+  hgr2 = NULL
+  for (l in locations) {
+    for (p in prices) {
+      for (r in rooms){
+        #let's randomise each segment
+        seg = hgr[loc==l & prc==p & room_type==r]
+        
+        seg$h_Rgen = seg$h_gen[sample(1:nrow(seg), nrow(seg))]
+        seg$g_Rgen = seg$g_gen[sample(1:nrow(seg), nrow(seg))]
+        seg$hg_Rgen = paste( tolower(seg$h_Rgen), tolower(seg$g_Rgen), sep="/")
+        
+        hgr2 = rbind(hgr2, seg)
+      }
+    }
+  }
+  
+  # kappa agreement score
+  # to check if there is agreement between actual and shuffled labels
+  df_g_kappa = data.frame(x=hgr2$g_gen, y=hgr2$g_Rgen)
+  df_h_kappa = data.frame(x=hgr2$h_gen, y=hgr2$h_Rgen)
+  df_kappa = rbind(df_g_kappa, df_h_kappa)
+  kappa_scores = append( kappa_scores, kappa2(df_kappa)$value )
+
+  # aggregating the null network
+  hg_Rgr_gen = hgr2[, .(rnd = .N, 
+                       Rsentiment = mean(compound, na.rm=TRUE),
+                       Rpos = mean(pos, na.rm=TRUE),
+                       Rneu = mean(neu, na.rm=TRUE),
+                       Rneg = mean(neg, na.rm=TRUE)),
+                   by=.(hg_Rgen, h_Rgen, g_Rgen)]
+  
+  # computing preferential attachment and gain sentiment
+  hg_Tjoin_gen = merge(hg_gr_gen, hg_Rgr_gen, by.x="hg_gen", by.y="hg_Rgen")
+  hg_Tjoin_gen[, p_attch := cnt/rnd - 1]
+  hg_Tjoin_gen[, gain_sentiment := sentiment/Rsentiment - 1]
+  hg_Tjoin_gen[, gain_pos := pos/Rpos - 1]
+  hg_Tjoin_gen[, gain_neu := neu/Rneu - 1]
+  hg_Tjoin_gen[, gain_neg := neg/Rneg - 1]
+  hg_Tjoin_gen$iteration = i
+  
+  hg_join_gen = rbind(hg_join_gen, hg_Tjoin_gen)
+  remove(hg_Rgr_gen, hg_Tjoin_gen)
+}
+
+hist(kappa_scores)
+```
+
+
+
+Visualisation: using box-plots so clearly see quartiles
+
+```{r}
+ggplot(hg_join_gen, aes(x=p_attch)) +
+  geom_vline(xintercept = 0, col="lightblue", size=1) +
+  geom_boxplot(size=.25, fill="gray90", alpha=.5, outlier.shape = 1) +
+  facet_grid( paste("Host -", h_gen) ~ paste("Guest -", g_gen) ) +
+  xlab("preferential attachment") + ylab("guests") +
+  scale_x_continuous(breaks = -10:10/10, limits = c(-.15, .15))
+```
+
+Visualisation: tile plot, more compact
+
+
+```{r}
+hg_gen = hg_join_gen[, 
+                     .(attach_m = median(p_attch),
+                       attach_05 = quantile(p_attch, probs = .05),
+                       attach_q1 = quantile(p_attch, probs = .25),
+                       attach_q3 = quantile(p_attch, probs = .75),
+                       attach_95 = quantile(p_attch, probs = .95),
+                       gain_sentiment = median(gain_sentiment),
+                       gain_pos = median(gain_pos),
+                       gain_neu = median(gain_neu),
+                       gain_neg = median(gain_neg)),
+                     by=.(g_gen, h_gen)]
+str(hg_gen)
+```
+
+Possible shapes: 4, 15, 18, 21, 23
+
+```{r}
+p = ggplot(hg_gen, aes(x=attach_m, y=g_gen, label=round(attach_m,2))) +
+  facet_wrap( ~ paste("Host:", h_gen)) +
+  geom_vline(xintercept = 0, col="gray", size=1.5) +
+  geom_col(width = 0.02, col="gray", fill="gray") +
+  geom_point(size=3) +
+  geom_text(size=4, vjust = -1) +
+  #scale_color_gradient(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-.45,.45)) +
+  #scale_x_continuous(limits = c(-0.2,NA), breaks=(-5:5)/5) +
+  ylab("Guest") + xlab("Preferential Attachment")
+
+print(p)
+```
+
+
+
+```{r}
+hg_gen$hg_gen = paste0(hg_gen$h_gen, "/", hg_gen$g_gen)
+
+p = ggplot(hg_gen, aes(x=attach_m, y=reorder(hg_gen, attach_m), fill=attach_m, col=attach_m, label=round(attach_m,2))) +
+  geom_vline(xintercept = 0, col="black", size=1) +
+  geom_col(width = 0.05) +
+  geom_point(size=4) +
+  geom_point(aes(x=(attach_05)), size=3, shape=3, col="black") +
+  geom_point(aes(x=(attach_95)), size=3, shape=3, col="black") +
+  geom_text(size=4, vjust = -1, col="black") +
+  scale_color_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-.06,.06)) +
+  scale_fill_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-.06,.06)) +
+  theme(legend.position = "none") +
+  ylab("Host / Guest") + xlab("Preferential Attachment")
+
+print(p)
+ggsave("pa_gen.pdf", plot = p, width = 5, height = 4)
+```
+
+
+
+```{r}
+hg_gen[, attach_disp := attach_m]
+hg_gen[attach_m>-0.03 & attach_m<0.03, attach_disp := 0]
+hg_gen[attach_m>0.45, attach_disp := 0.45]
+
+p = ggplot(hg_gen, aes(x=g_gen, y=h_gen, fill=attach_disp)) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-.45,.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = paste("q1:", round(attach_q1,2)) ), color = "gray30", size = 3, vjust=-2) +
+  geom_text(aes(label = round(attach_m,2)), color = "black", size = 4) +
+  geom_text(aes(label = paste("q3:", round(attach_q3,2)) ), color = "gray30", size = 3, vjust=3) +
+  labs(fill="pa") +
+  xlab("guests") + ylab("hosts") 
+
+print(p)
+#ggsave("pa_gen.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+
+
+
+# Null model for age
+
+```{r}
+# aggregating the actual network
+hg_gr_age = hgr[, .(cnt = .N, 
+                    sentiment = mean(compound, na.rm=TRUE),
+                    pos = mean(pos, na.rm=TRUE),
+                    neu = mean(neu, na.rm=TRUE),
+                    neg = mean(neg, na.rm=TRUE)),
+                by=.(hg_age, h_age, g_age)]
+
+hg_join_age = NULL
+kappa_scores = NULL
+for (i in 1:myloop)
+{
+  hgr2 = NULL
+  for (l in locations) {
+    for (p in prices) {
+      for (r in rooms){
+        #let's randomise each segment
+        seg = hgr[loc==l & prc==p & room_type==r]
+        
+        seg$h_Rage = seg$h_age[sample(1:nrow(seg), nrow(seg))]
+        seg$g_Rage = seg$g_age[sample(1:nrow(seg), nrow(seg))]
+        seg$hg_Rage = paste( tolower(seg$h_Rage), tolower(seg$g_Rage), sep="/")
+        
+        hgr2 = rbind(hgr2, seg)
+      }
+    }
+  }
+  
+  # kappa agreement score
+  # to check if there is agreement between actual and shuffled labels
+  df_g_kappa = data.frame(x=hgr2$g_age, y=hgr2$g_Rage)
+  df_h_kappa = data.frame(x=hgr2$h_age, y=hgr2$h_Rage)
+  df_kappa = rbind(df_g_kappa, df_h_kappa)
+  kappa_scores = append( kappa_scores, kappa2(df_kappa)$value )
+
+  # aggregating the null network
+  hg_Rgr_age = hgr2[, .(rnd = .N, 
+                       Rsentiment = mean(compound, na.rm=TRUE),
+                       Rpos = mean(pos, na.rm=TRUE),
+                       Rneu = mean(neu, na.rm=TRUE),
+                       Rneg = mean(neg, na.rm=TRUE)),
+                   by=.(hg_Rage, h_Rage, g_Rage)]
+  
+  # computing preferential attachment and gain sentiment
+  hg_Tjoin_age = merge(hg_gr_age, hg_Rgr_age, by.x="hg_age", by.y="hg_Rage")
+  hg_Tjoin_age[, p_attch := cnt/rnd - 1]
+  hg_Tjoin_age[, gain_sentiment := sentiment/Rsentiment - 1]
+  hg_Tjoin_age[, gain_pos := pos/Rpos - 1]
+  hg_Tjoin_age[, gain_neu := neu/Rneu - 1]
+  hg_Tjoin_age[, gain_neg := neg/Rneg - 1]
+  hg_Tjoin_age$iteration = i
+  
+  hg_join_age = rbind(hg_join_age, hg_Tjoin_age)
+  remove(hg_Rgr_age, hg_Tjoin_age)
+}
+
+hist(kappa_scores)
+```
+
+
+```{r}
+ggplot(hg_join_age, aes(x=p_attch)) +
+  geom_vline(xintercept = 0, col="lightblue", size=1) +
+  geom_boxplot(size=.25, fill="gray90", alpha=.5, outlier.shape = 1) +
+  facet_grid( paste("Host -", h_age) ~ paste("Guest -", g_age) ) +
+  xlab("preferential attachment") + ylab("guests") +
+  scale_x_continuous(breaks = -10:10/10, limits = c(-.15, .15))
+```
+
+
+```{r}
+hg_age = hg_join_age[, 
+                     .(attach_m = median(p_attch),
+                       attach_05 = quantile(p_attch, probs = .05),
+                       attach_q1 = quantile(p_attch, probs = .25),
+                       attach_q3 = quantile(p_attch, probs = .75),
+                       attach_95 = quantile(p_attch, probs = .95),
+                       gain_sentiment = median(gain_sentiment),
+                       gain_pos = median(gain_pos),
+                       gain_neu = median(gain_neu),
+                       gain_neg = median(gain_neg)),
+                     by=.(g_age, h_age)]
+str(hg_age)
+```
+
+```{r}
+p = ggplot(hg_age, aes(x=attach_m, y=g_age, label=round(attach_m,2))) +
+  facet_wrap( ~ paste("Host:", h_age)) +
+  geom_vline(xintercept = 0, col="gray", size=1.5) +
+  geom_col(col="gray", fill="gray", width = 0.02) +
+  geom_point(size=3, col="orange") +
+  geom_text(size=4, vjust = -1) +
+  #scale_x_continuous(limits = c(-0.2,NA), breaks=(-5:5)/5) +
+  ylab("Guest") + xlab("Preferential Attachment")
+
+print(p)
+```
+
+
+
+```{r}
+hg_age$hg_age = paste0(hg_age$h_age, "/", hg_age$g_age)
+
+p = ggplot(hg_age, aes(x=(attach_m), y=reorder(hg_age, attach_m), fill=attach_m, col=attach_m, label=round(attach_m,2))) +
+  geom_vline(xintercept = 0, col="black", size=1) +
+  geom_col(width = 0.1) +
+  geom_point(size=4) +
+  geom_point(aes(x=(attach_05)), size=3, shape=3, col="black") +
+  geom_point(aes(x=(attach_95)), size=3, shape=3, col="black") +
+  geom_text(size=4, vjust = -1, col="black") +
+  scale_color_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-.12,.12)) +
+  scale_fill_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-.12,.12)) +
+  theme(legend.position = "none") +
+  ylab("Host / Guest") + xlab("Preferential Attachment")
+
+print(p)
+ggsave("pa_age.pdf", plot = p, width = 5, height = 4)
+```
+
+
+
+```{r}
+hg_age[, attach_disp := attach_m]
+hg_age[attach_m>-0.03 & attach_m<0.03, attach_disp := 0]
+hg_age[attach_m>0.45, attach_disp := 0.45]
+
+p = ggplot(hg_age, aes(x=g_age, y=h_age, fill=attach_disp)) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-.45,.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = paste("q1:", round(attach_q1,2)) ), color = "gray30", size = 3, vjust=-2) +
+  geom_text(aes(label = round(attach_m,2)), color = "black", size = 4) +
+  geom_text(aes(label = paste("q3:", round(attach_q3,2)) ), color = "gray30", size = 3, vjust=3) +
+  labs(fill="pa") +
+  xlab("guests") + ylab("hosts") 
+
+print(p)
+#ggsave("pa_age.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+
+# Null model for ethnicity 
+
+```{r}
+# aggregating the actual network
+hg_gr_etn = hgr[, .(cnt = .N, 
+                    sentiment = mean(compound, na.rm=TRUE),
+                    pos = mean(pos, na.rm=TRUE),
+                    neu = mean(neu, na.rm=TRUE),
+                    neg = mean(neg, na.rm=TRUE)),
+                by=.(hg_etn, h_etn, g_etn)]
+
+hg_join_etn = NULL
+kappa_scores = NULL
+for (i in 1:myloop)
+{
+  hgr2 = NULL
+  for (l in locations) {
+    for (p in prices) {
+      for (r in rooms){
+        #let's randomise each segment
+        seg = hgr[loc==l & prc==p & room_type==r]
+        
+        seg$h_Retn = seg$h_etn[sample(1:nrow(seg), nrow(seg))]
+        seg$g_Retn = seg$g_etn[sample(1:nrow(seg), nrow(seg))]
+        seg$hg_Retn = paste( tolower(seg$h_Retn), tolower(seg$g_Retn), sep="/")
+        
+        hgr2 = rbind(hgr2, seg)
+      }
+    }
+  }
+
+  # kappa agreement score
+  # to check if there is agreement between actual and shuffled labels
+  df_g_kappa = data.frame(x=hgr2$g_etn, y=hgr2$g_Retn)
+  df_h_kappa = data.frame(x=hgr2$h_etn, y=hgr2$h_Retn)
+  df_kappa = rbind(df_g_kappa, df_h_kappa)
+  kappa_scores = append( kappa_scores, kappa2(df_kappa)$value )  
+  
+  # aggregating the null network
+  hg_Rgr_etn = hgr2[, .(rnd = .N, 
+                       Rsentiment = mean(compound, na.rm=TRUE),
+                       Rpos = mean(pos, na.rm=TRUE),
+                       Rneu = mean(neu, na.rm=TRUE),
+                       Rneg = mean(neg, na.rm=TRUE)),
+                   by=.(hg_Retn, h_Retn, g_Retn)]
+  
+  # computing preferential attachment and gain sentiment
+  hg_Tjoin_etn = merge(hg_gr_etn, hg_Rgr_etn, by.x="hg_etn", by.y="hg_Retn")
+  hg_Tjoin_etn[, p_attch := cnt/rnd - 1]
+  hg_Tjoin_etn[, gain_sentiment := sentiment/Rsentiment - 1]
+  hg_Tjoin_etn[, gain_pos := pos/Rpos - 1]
+  hg_Tjoin_etn[, gain_neu := neu/Rneu - 1]
+  hg_Tjoin_etn[, gain_neg := neg/Rneg - 1]
+  hg_Tjoin_etn$iteration = i
+  
+  hg_join_etn = rbind(hg_join_etn, hg_Tjoin_etn)
+  remove(hg_Rgr_etn, hg_Tjoin_etn)
+}
+
+hist(kappa_scores)
+```
+
+
+```{r}
+ggplot(hg_join_etn, aes(x=p_attch)) +
+  geom_vline(xintercept = 0, col="lightblue", size=1) +
+  geom_boxplot(size=.25, fill="gray90", alpha=.5, outlier.shape = 1) +
+  facet_grid( paste("Host -", h_etn) ~ paste("Guest -", g_etn) ) +
+  xlab("preferential attachment") + ylab("guests") +
+  scale_x_continuous(breaks = -10:10/2, limits = c(-1.5, 1.5))
+```
+
+
+```{r}
+hg_etn = hg_join_etn[, 
+                     .(attach_m = median(p_attch),
+                       attach_05 = quantile(p_attch, probs = .05),
+                       attach_q1 = quantile(p_attch, probs = .25),
+                       attach_q3 = quantile(p_attch, probs = .75),
+                       attach_95 = quantile(p_attch, probs = .95),
+                       gain_sentiment = median(gain_sentiment),
+                       gain_pos = median(gain_pos),
+                       gain_neu = median(gain_neu),
+                       gain_neg = median(gain_neg)),
+                     by=.(g_etn, h_etn)]
+str(hg_etn)
+```
+
+```{r}
+p = ggplot(hg_etn, aes(x=attach_m, y=g_etn, label=round(attach_m,2))) +
+  facet_wrap( ~ paste("Host:", h_etn)) +
+  geom_vline(xintercept = 0, col="gray", size=1.5) +
+  geom_col(col="gray", fill="gray", width = 0.05) +
+  geom_point(size=3, col="orange") +
+  geom_text(size=4, vjust = -1) +
+  scale_x_continuous(limits = c(-0.2,NA), breaks=(-5:5)/5) +
+  ylab("Guest") + xlab("Preferential Attachment")
+
+
+print(p)
+```
+
+
+```{r}
+hg_etn$hg_etn = paste0(hg_etn$h_etn, "/", hg_etn$g_etn)
+
+p = ggplot(hg_etn[abs(attach_m)>0.05], aes(x=attach_m, y=reorder(hg_etn, attach_m), 
+                                           fill=sign(attach_m)*abs(attach_m)^(1/2), 
+                                           col=sign(attach_m)*abs(attach_m)^(1/2), 
+                                           label=round(attach_m,2))) +
+  geom_vline(xintercept = 0, col="black", size=1) +
+  geom_col(width = 0.1) +
+  geom_point(size=4) +
+  geom_point(aes(x=(attach_05)), size=3, shape=3, col="black") +
+  geom_point(aes(x=(attach_95)), size=3, shape=3, col="black") +
+  geom_text(size=4, vjust = -1, col="black") +
+  scale_color_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-1.1,1.1)) +
+  scale_fill_gradient2(low = "darkred", high="forestgreen", mid="white", midpoint = 0, limits=c(-1.1,1.1)) +
+  theme(legend.position = "none") +
+  scale_x_continuous(limits = c(-0.2,NA), breaks=(-5:5)/5) +
+  ylab("Host / Guest") + xlab("Preferential Attachment")
+
+print(p)
+ggsave("pa_etn.pdf", plot = p, width = 5, height = 4)
+```
+
+```{r}
+hg_etn[, attach_disp := attach_m]
+hg_etn[attach_m>-0.03 & attach_m<0.03, attach_disp := 0]
+hg_etn[attach_m>0.45, attach_disp := 0.45]
+
+p = ggplot(hg_etn, aes(x=g_etn, y=h_etn, fill=attach_disp)) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-.45,.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = paste("q1:", round(attach_q1,2)) ), color = "gray30", size = 3, vjust=-2) +
+  geom_text(aes(label = round(attach_m,2)), color = "black", size = 4) +
+  geom_text(aes(label = paste("q3:", round(attach_q3,2)) ), color = "gray30", size = 3, vjust=3) +
+  labs(fill="pa") +
+  xlab("guests") + ylab("hosts") 
+
+print(p)
+#ggsave("pa_gen.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+
+# Combining all together (age, gender, ethnicity)
+
+Binding all aggregated data (from age, gender, ethnicity)
+
+```{r}
+hg_all = rbind(hg_age[, .(guest=g_age, host=h_age, pa=attach_m, gain_comp=gain_sentiment, gain_pos, gain_neu, gain_neg, gr="age")], 
+               hg_etn[, .(guest=g_etn, host=h_etn, pa=attach_m, gain_comp=gain_sentiment, gain_pos, gain_neu, gain_neg, gr="etn")],
+               hg_gen[, .(guest=g_gen, host=h_gen, pa=attach_m, gain_comp=gain_sentiment, gain_pos, gain_neu, gain_neg, gr="gen")])
+
+str(hg_all)
+```
+Simplifying the notation
+
+```{r}
+hg_all[guest=="18-29", guest:="18"]
+hg_all[guest=="30-39", guest:="30"]
+hg_all[guest=="40+", guest:="40"]
+
+hg_all[guest=="Asian", guest:="A"]
+hg_all[guest=="Black", guest:="B"]
+hg_all[guest=="White", guest:="W"]
+hg_all[guest=="Others", guest:="O"]
+
+hg_all[guest=="female", guest:="F"]
+hg_all[guest=="male", guest:="M"]
+
+table(hg_all$guest)
+```
+
+
+```{r}
+hg_all[host=="18-29", host:="18"]
+hg_all[host=="30-39", host:="30"]
+hg_all[host=="40+", host:="40"]
+
+hg_all[host=="Asian", host:="A"]
+hg_all[host=="Black", host:="B"]
+hg_all[host=="White", host:="W"]
+hg_all[host=="Others", host:="O"]
+
+hg_all[host=="Female", host:="F"]
+hg_all[host=="Male", host:="M"]
+
+table(hg_all$host)
+```
+
+```{r}
+hg_all$homophily = "false"
+hg_all[guest==host, homophily := "true"]
+```
+
+
+
+
+
+
+
+
+```{r}
+ggplot(hg_all, aes(x=pa, y=(gain_pos))) +
+  geom_vline(xintercept = 0, col="lightblue", size=.5) +
+  geom_hline(yintercept = 0, col="lightblue", size=.5) +
+  geom_point(aes(col=gr, shape=homophily), fill=2, size=3) +
+  scale_shape_manual(values=c(1, 16)) +
+  geom_text_repel(aes( label=paste(guest, host, sep="/") ), color = "black", size = 3) +
+  labs(col="group") +
+  xlab("preferential attachment") + ylab("gain in positive score") +
+  scale_x_continuous(breaks = -10:10/20, limits = c(-.15, .15)) +
+  scale_y_continuous(breaks = -10:10/20, limits = c(-.1, .1))
+```
+
+```{r}
+ggplot(hg_all, aes(x=pa, y=(gain_neu))) +
+  geom_vline(xintercept = 0, col="lightblue", size=.5) +
+  geom_hline(yintercept = 0, col="lightblue", size=.5) +
+  geom_point(aes(col=gr, shape=homophily), fill=2, size=3) +
+  scale_shape_manual(values=c(1, 16)) +
+  geom_text_repel(aes( label=paste(guest, host, sep="/") ), color = "black", size = 3) +
+  labs(col="group") +
+  xlab("preferential attachment") + ylab("gain in neutral score") +
+  scale_x_continuous(breaks = -10:10/20, limits = c(-.15, .15)) +
+  scale_y_continuous(breaks = -10:10/20, limits = c(-.1, .1))
+```
+
+```{r}
+ggplot(hg_all, aes(x=pa, y=(gain_neg))) +
+  geom_vline(xintercept = 0, col="lightblue", size=.5) +
+  geom_hline(yintercept = 0, col="lightblue", size=.5) +
+  geom_point(aes(col=gr, shape=homophily), fill=2, size=3) +
+  scale_shape_manual(values=c(1, 16)) +
+  geom_text_repel(aes( label=paste(guest, host, sep="/") ), color = "black", size = 3) +
+  labs(col="group") +
+  xlab("preferential attachment") + ylab("gain in negative score") +
+  scale_x_continuous(breaks = -10:10/20, limits = c(-.15, .15)) +
+  scale_y_continuous(breaks = -10:10/20, limits = c(-.1, .1))
+```
+
+```{r}
+p = ggplot(hg_all, aes(x=pa, y=(gain_comp+0.01))) +
+  geom_vline(xintercept = 0, col="lightblue", size=.5) +
+  geom_hline(yintercept = 0, col="lightblue", size=.5) +
+  geom_point(aes(col=gr, shape=homophily), fill=2, size=3) +
+  scale_shape_manual(values=c(1, 16)) +
+  geom_text_repel(aes( label=paste(guest, host, sep="/") ), color = "black", size = 3) +
+  labs(col="group") +
+  xlab("preferential attachment") + ylab("sentiment gain") +
+  scale_x_continuous(breaks = -10:10/20, limits = c(-.15, .15)) +
+  scale_y_continuous(breaks = -10:10/20, limits = c(-.15, .15))
+
+print(p)
+#ggsave("sent_vs_pa.pdf", plot = p)
+```
+
+
+```{r}
+ggplot(hg_all, aes(x=rank(pa), y=(gain_comp+0.01))) +
+  geom_hline(yintercept = 0, col="lightblue", size=.5) +
+  geom_point(aes(col=gr, shape=homophily), fill=2, size=3) +
+  scale_shape_manual(values=c(1, 16)) +
+  geom_text_repel(aes( label=paste(guest, host, sep="/") ), color = "black", size = 3) +
+  labs(col="group") +
+  xlab("rank of preferential attachment") + ylab("gain in sentiment") +
+  scale_y_continuous(breaks = -10:10/20, limits = c(-.1, .1))
+```
+
+```{r}
+cor.test(hg_all$pa, hg_all$gain_comp, method="spearman")
+```
+
+
+```{r}
+hg_gen$sent = hg_gen$gain_sentiment + 0.01
+hg_gen[, sentiment_disp := sent]
+hg_gen[sent>-0.019 & sent<0.019, sentiment_disp := 0]
+
+hg_gen[g_gen == "male", g_gen := "Male"]
+hg_gen[g_gen == "female", g_gen := "Female"]
+
+p = ggplot(hg_gen, aes(x=g_gen, y=h_gen, fill = sentiment_disp )) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-0.45, 0.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = round(sent,2)), color = "black", size = 3) +
+  labs(fill="sent_gain") +
+  xlab("guests") + ylab("hosts") +
+  theme(legend.position = "none")
+
+print(p)
+#ggsave("sent_gen.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+```{r}
+hg_age$sent = hg_age$gain_sentiment + 0.01
+hg_age[, sentiment_disp := sent]
+hg_age[sent>-0.019 & sent<0.019, sentiment_disp := 0]
+
+p = ggplot(hg_age, aes(x=g_age, y=h_age, fill = sentiment_disp )) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-0.45, 0.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = round(sent,2)), color = "black", size = 3) +
+  labs(fill="sent_gain") +
+  xlab("guests") + ylab("hosts") +
+  theme(legend.position = "none")
+
+print(p)
+#ggsave("sent_age.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+```{r}
+hg_etn$sent = hg_etn$gain_sentiment + 0.01
+hg_etn[, sentiment_disp := sent]
+hg_etn[sent>-0.017 & sent<0.017, sentiment_disp := 0]
+
+p = ggplot(hg_etn, aes(x=g_etn, y=h_etn, fill = sentiment_disp )) +
+  scale_fill_gradient2(low = "orange", high="forestgreen", mid="white", midpoint = 0, limits=c(-0.45, 0.45)) +
+  geom_tile(color = "white", lwd = 3, linetype = 1) +
+  geom_text(aes(label = round(sent,2)), color = "black", size = 3) +
+  labs(fill="sent_gain") +
+  xlab("guests") + ylab("hosts") +
+  theme(legend.position = "note")
+
+print(p)
+#ggsave("sent_etn.pdf", plot = p, width = 3.5, height = 3.5)
+```
+
+
+
+```{r}
+ggplot(hgr, aes(x=pos)) +
+  geom_histogram(aes(y = ..density..), bins = 100, fill="cyan4") +
+  geom_density() 
+```
+
+```{r}
+ggplot(hgr, aes(x=neu)) +
+  geom_histogram(aes(y = ..density..), bins = 100, fill="cyan4") +
+  geom_density() 
+```
+
+```{r}
+ggplot(hgr, aes(x=neg)) +
+  geom_histogram(aes(y = ..density..), bins = 100, fill="cyan4") +
+  geom_density() 
+```
+
+```{r}
+ggplot(hgr, aes(x=compound)) +
+  geom_histogram(aes(y = ..density..), bins = 100, fill="cyan4") +
+  geom_density() 
+```
+
+
+
+End!
