@@ -12,14 +12,11 @@ theme_set(theme_light())
 
 # Loading data
 
-```{r}
-hgr = fread("../Data/host_guests_reviews.csv")
-str(hgr)
-```
+
 
 ```{r}
-hosts = hgr[, .(.N), by=.(listing_id, h_gen, h_age, h_etn, host_since_year)]
-guests = hgr[, .(.N), by=.(guest_id, g_gen, g_age, g_etn, guest_since_year)]
+hosts = fread("../data/hosts_anonimised.csv")
+guests = fread("../data/guests_anonimised.csv")
 ```
 
 
